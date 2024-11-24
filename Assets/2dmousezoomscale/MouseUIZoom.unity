@@ -382,10 +382,10 @@ RectTransform:
   - {fileID: 417805885}
   m_Father: {fileID: 1351980097}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
-  m_AnchorMin: {x: 0, y: 0}
-  m_AnchorMax: {x: 1, y: 1}
+  m_AnchorMin: {x: 0.5, y: 0.5}
+  m_AnchorMax: {x: 0.5, y: 0.5}
   m_AnchoredPosition: {x: 0, y: 0}
-  m_SizeDelta: {x: -200, y: -200}
+  m_SizeDelta: {x: 1920, y: 1080}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &647126279
 MonoBehaviour:
@@ -1362,6 +1362,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1391432910}
   - component: {fileID: 1391432911}
+  - component: {fileID: 1391432912}
   m_Layer: 0
   m_Name: zoom
   m_TagString: Untagged
@@ -1391,17 +1392,26 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1391432909}
-  m_Enabled: 0
+  m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 990e160a340d12b4dbfad899e7c6dbdd, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
   canvasRectTransform: {fileID: 647126278}
-  scrollarea: {fileID: 0}
-  zoomSpeed: 0.25
-  minScale: {x: 0.5, y: 0.5, z: 0.5}
-  maxScale: {x: 2, y: 2, z: 2}
+  zoomSpeed: 1
   panSpeed: 1
+--- !u!114 &1391432912
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1391432909}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 24089c6a68128274ab3d0f6052e94f9f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!1 &1535563428
 GameObject:
   m_ObjectHideFlags: 0
@@ -1591,7 +1601,7 @@ Canvas:
   m_GameObject: {fileID: 1715641699}
   m_Enabled: 1
   serializedVersion: 3
-  m_RenderMode: 1
+  m_RenderMode: 0
   m_Camera: {fileID: 0}
   m_PlaneDistance: 100
   m_PixelPerfect: 0

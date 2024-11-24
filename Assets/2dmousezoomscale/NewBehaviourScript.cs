@@ -1,111 +1,46 @@
 using UnityEngine;
-using UnityEngine.UI;
 
 public class NewBehaviourScript : MonoBehaviour
 {
     [SerializeField] RectTransform canvasRectTransform;
-    [SerializeField] RectTransform scrollarea;
 
-    // Zoom speed factor
     public float zoomSpeed = 0.1f;
-
-    // Minimum and maximum scale limits
-    public Vector3 minScale = new Vector3(0.5f, 0.5f, 0.5f);
-    public Vector3 maxScale = new Vector3(2f, 2f, 2f);
 
     void Update()
     {
-        //if(Mathf.Abs(Input.mouseScrollDelta.y) > 0)
-        //{
-        //    var scale = rt.localScale.x;
-
-        //    //mousePosition contains position of mouse inside scaled area in percentages
-        //    var mousePosition = (Vector2)(Input.mousePosition - rt.position) - rt.rect.position * scale;
-        //    mousePosition.x /= rt.rect.width * scale;
-        //    mousePosition.y /= rt.rect.height * scale;
-
-        //    var contentSize = scrollarea.content.rect;
-        //    var shiftX = -scaleDelta * contentSize.width * (mousePosition.x - 0.5f);
-        //    var shiftY = -scaleDelta * contentSize.height * (mousePosition.y - 0.5f);
-        //    var currPos = scrollarea.content.localPosition;
-        //    scrollarea.content.localPosition = new Vector3(currPos.x + shiftX, currPos.y + shiftY, currPos.z);
-        //}
-
-        Zoom3();
-
+        Zoom();
 
         Pan();
     }
 
-    private Vector3 previousMousePosition;
-    void Zoom3()
+    void Zoom()
     {
-        // Get scroll wheel input
         float scrollInput = Input.GetAxis("Mouse ScrollWheel");
 
-        // If there is scroll input, zoom in or out
         if (scrollInput != 0)
         {
-            // Calculate the new scale
             Vector3 scaleChange = new Vector3(scrollInput, scrollInput, scrollInput) * zoomSpeed;
             Vector3 newScale = canvasRectTransform.localScale + scaleChange;
 
-            // Clamp the scale between min and max limits
-            newScale = new Vector3(
-                Mathf.Clamp(newScale.x, minScale.x, maxScale.x),
-                Mathf.Clamp(newScale.y, minScale.y, maxScale.y),
-                Mathf.Clamp(newScale.z, minScale.z, maxScale.z)
-            );
+            var oldPivot = canvasRectTransform.pivot;
 
-            Vector2 localPoint;
-            RectTransformUtility.ScreenPointToLocalPointInRectangle(canvasRectTransform, Input.mousePosition, Camera.main, out localPoint);
+            ChangePivotAndHold(canvasRectTransform, new Vector2(0, 0));
 
-            // Apply the new scale to the canvas
+            RectTransformUtility.ScreenPointToLocalPointInRectangle(canvasRectTransform, Input.mousePosition, null, out var localPointBeforeScale);
+
+            ChangePivotAndHold(canvasRectTransform, localPointBeforeScale / canvasRectTransform.rect.size);
             canvasRectTransform.localScale = newScale;
 
-            // Move the UI back to the mouse position after zooming
-            Vector3 offset = new Vector3(localPoint.x, localPoint.y, 0) - canvasRectTransform.localPosition;
-            canvasRectTransform.localPosition = new Vector3(localPoint.x, localPoint.y, 0) - offset;
+            RectTransformUtility.ScreenPointToLocalPointInRectangle(canvasRectTransform, Input.mousePosition, null, out var localPointAfterScale);
 
-            print(localPoint);
-            print(canvasRectTransform.localPosition);
-            print(offset);
+            ChangePivotAndHold(canvasRectTransform, oldPivot);
 
-
+            //Vector3 offset = localPointAfterScale - localPointBeforeScale;
+            //canvasRectTransform.localPosition += offset;
         }
     }
 
     void Zoom2()
-    {
-        // Get scroll wheel input
-        float scrollInput = Input.GetAxis("Mouse ScrollWheel");
-
-        // If there's scroll input, zoom in or out
-        if (scrollInput != 0)
-        {
-            // Change scale based on scroll input
-            Vector3 newScale = canvasRectTransform.localScale + new Vector3(scrollInput, scrollInput, scrollInput) * zoomSpeed;
-
-            // Clamp the scale between the min and max limits
-            newScale = new Vector3(
-                Mathf.Clamp(newScale.x, minScale.x, maxScale.x),
-                Mathf.Clamp(newScale.y, minScale.y, maxScale.y),
-                Mathf.Clamp(newScale.z, minScale.z, maxScale.z)
-            );
-
-            // Apply the new scale to the UI element
-            canvasRectTransform.localScale = newScale;
-        }
-    }
-
-
-    void ZoomScale(RectTransform rt)
-    {
-
-    }
-
-
-    void Zoom()
     {
         //https://stackoverflow.com/questions/33433872/zoom-to-mouse-position-like-3ds-max-in-unity3d?rq=3
         if (Input.GetAxis("Mouse ScrollWheel") != 0)
@@ -147,5 +82,28 @@ public class NewBehaviourScript : MonoBehaviour
         {
             lastMousePosition = Input.mousePosition;
         }
+    }
+
+
+
+
+    /// <summary>
+    /// Changes Pivot of UI Object, and hold object in place (does not having the object moving, position values changes to achive this)
+    /// 
+    /// Context:
+    /// In Unity Inspector, while changing pivot, it also automatically changes the position accordingly so that the object stays in place while pivot changes
+    /// In Unity Inspector Debug mode, changing the pivot does not change the position, hence the object will move.
+    /// Changing Pivot in script is the same as Unity Inspector Debug Mode.
+    /// </summary>
+    void ChangePivotAndHold(RectTransform rt, Vector2 newPivot)
+    {
+        var oldPivot = rt.pivot;
+
+        rt.pivot = newPivot;
+
+        var pivotDiff = newPivot - oldPivot;
+        var offset = pivotDiff * (rt.rect.size * rt.localScale);
+
+        rt.anchoredPosition += offset;
     }
 }
