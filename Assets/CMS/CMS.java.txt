@@ -1,0 +1,968 @@
+//// CMS.java ////
+package cms;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Deque;
+import java.util.Iterator;
+import java.util.LinkedList;
+import java.util.List;
+
+import Jama.Matrix;
+import Jama.SingularValueDecomposition;
+import cms.CMSCell.Face;
+
+public class CMS {
+	/**
+	 * MS case index -> MS edge indices
+	 */
+	private static final byte[][] MS_EDGE_TABLE = new byte[][] {
+		{},
+		{3, 0},
+		{0, 1},
+		{3, 1},
+		{1, 2},
+		{3, 2, 1, 0},
+		{0, 2},
+		{3, 2},
+		{2, 3},
+		{2, 0},
+		{2, 3, 0, 1},
+		{2, 1},
+		{1, 3},
+		{1, 0},
+		{0, 3},
+		{}
+	};
+
+
+	private static class Segment {
+		private final Vec3[] vertices;
+		private final Vec3[] normals;
+		private final int startEdge, endEdge; //TODO Use edges to optimize strip to component joining?
+
+		public Segment(Vec3[] vertices, Vec3[] normals, int startEdge, int endEdge) {
+			this.vertices = vertices;
+			this.normals = normals;
+			this.startEdge = startEdge;
+			this.endEdge = endEdge;
+		}
+	}
+
+	protected boolean isSolid(int material) {
+		return material != 0;
+	}
+
+	/**
+	 * Returns whether there is a sharp feature in a 2D cell
+	 * @param theta := n₁ᵀ n₂, where n₁ and n₂ are the normals at the surface intersections. This value is the cosine of
+	 * the angle between the two normals.
+	 */
+	protected boolean isSharp2DFeature(float theta) {
+		return theta < 0.8;
+	}
+
+	/**
+	 * Returns whether there is a sharp feature in a 3D component
+	 * @param theta := minᵢ,ⱼ(nᵢᵀ nⱼ), where nᵢ and nⱼ are normals of the component. This value is the cosine of the maximum angle
+	 * between the component's normals.
+	 */
+	protected boolean isSharp3DFeature(float theta) {
+		return theta < 0.8F;
+	}
+
+	/**
+	 * Returns whether there is a sharp corner feature in a 3D component
+	 * @param phi := maxᵢ|nᵢᵀ n*|, where n* = n₀ x n₁ and n₀/n₁ are the component's normals that span the maximum angle. This value is the cosine of the minimum angle 
+	 * between the component's normals and the normal of the plane spanned by n₀ and n₁.
+	 */
+	protected boolean isSharp3DCornerFeature(float phi) {
+		return phi > 0.7F;
+	}
+
+	/**
+	 * Runs the Cubical Marching Squares algorithm on the specified CMS cell
+	 * @param cell Input cell with the Hermite Data
+	 * @return A list containing the reconstructed 3D surface components
+	 */
+	public List<Component> cms(CMSCell cell) {
+		Deque<Segment> segments = new LinkedList<>();
+
+		for(Face face : Face.values()) {
+			for(int faceCellIndex : cell.getCells(face)) {
+				this.generateFaceCellSegments(cell, faceCellIndex, face, segments);
+			}
+		}
+
+		List<Component> components = new ArrayList<>();
+
+		this.generateComponents(segments, components);
+
+		for(int i = 0; i < components.size(); i++) {
+			components.set(i, this.reconstruct3DSharpFeature(components.get(i)));
+		}
+
+		//TODO 3D disambiguation by checking for overlapping volumes, and if overlapping join the two components as cylinder
+
+		return components;
+	}
+
+	/**
+	 * Reconstructs the 3D sharp feature of the specified component
+	 * @param component Component to reconstruct the 3D sharp feature of
+	 * @return The resulting component which includes the 3D sharp feature if one was found, otherwise the input component is returned
+	 */
+	private Component reconstruct3DSharpFeature(Component component) {
+		float theta = 1.0F;
+
+		Vec3 n0 = null;
+		Vec3 n1 = null;
+
+		int samples = 0;
+
+		for(Vec3 normal1 : component.getNormals()) {
+			if(normal1 != null) {
+				for(Vec3 normal2 : component.getNormals()) {
+					if(normal2 != null && normal1 != normal2) {
+						float ctheta = (float) normal1.dot(normal2);
+
+						if(ctheta <= theta) {
+							n0 = normal1;
+							n1 = normal2;
+							theta = ctheta;
+						}
+					}
+				}
+
+				samples++;
+			}
+		}
+
+		if(samples <= 2) {
+			//Not enough samples for a 3D sharp feature!
+			return component;
+		}
+
+		boolean is3DSharpFeature = n0 != null && n1 != null && this.isSharp3DFeature(theta);
+		boolean is3DSharpCornerFeature = false;
+
+		if(is3DSharpFeature) {
+			Vec3 planeNormal = n0.cross(n1);
+			float phi = 0.0F;
+
+			for(Vec3 normal : component.getNormals()) {
+				if(normal != null) {
+					phi = Math.max(phi, (float) Math.abs(normal.dot(planeNormal)));
+				}
+			}
+
+			is3DSharpCornerFeature = this.isSharp3DCornerFeature(phi);
+		}
+
+		if(is3DSharpFeature) {
+			float meanX = 0;
+			float meanY = 0;
+			float meanZ = 0;
+
+			double[][] mn = new double[samples][3];
+			double[][] mr = new double[samples][1];
+
+			for(int j = 0, i = 0; i < component.getVertices().length; i++) {
+				Vec3 normal = component.getNormals()[i];
+
+				if(normal != null) {
+					Vec3 vertex = component.getVertices()[i];
+
+					meanX += (float) vertex.x / (float) samples;
+					meanY += (float) vertex.y / (float) samples;
+					meanZ += (float) vertex.z / (float) samples;
+
+					mn[j] = new double[] { normal.x, normal.y, normal.z };
+
+					j++;
+				}
+			}
+
+			for(int j = 0, i = 0; i < component.getVertices().length; i++) {
+				Vec3 normal = component.getNormals()[i];
+
+				if(normal != null) {
+					Vec3 vertex = component.getVertices()[i];
+
+					mr[j] = new double[] { normal.x * (vertex.x - meanX) + normal.y * (vertex.y - meanY) + normal.z * (vertex.z - meanZ) };
+
+					j++;
+				}
+			}
+
+			SingularValueDecomposition svd = new Matrix(mn).svd();
+
+			Matrix u = svd.getU();
+			Matrix s = svd.getS();
+			Matrix v = svd.getV();
+
+			if(!is3DSharpCornerFeature) {
+				//Zero out the smallest singular value to remove potential noise
+				s.set(s.getColumnDimension() - 1, s.getColumnDimension() - 1, 0);
+			}
+
+			//Create pseudo inverse
+			for(int i = 0; i < s.getColumnDimension(); i++) {
+				double singularValue = s.get(i, i);
+				if(singularValue != 0) {
+					s.set(i, i, 1 / singularValue);
+				}
+			}
+			Matrix pseudoInverse = v.times(s).times(u.transpose());
+
+			Matrix leastSquaresSolution = pseudoInverse.times(new Matrix(mr));
+
+			Vec3 sharpFeature = new Vec3(leastSquaresSolution.get(0, 0) + meanX, leastSquaresSolution.get(1, 0) + meanY, leastSquaresSolution.get(2, 0) + meanZ);
+
+			Vec3[] vertices = new Vec3[component.getVertices().length + 1];
+			System.arraycopy(component.getVertices(), 0, vertices, 1, component.getVertices().length);
+
+			Vec3[] normals = new Vec3[component.getNormals().length + 1];
+			System.arraycopy(component.getNormals(), 0, normals, 1, component.getNormals().length);
+
+			vertices[0] = sharpFeature;
+			normals[0] = null;
+
+			return new Component(vertices, normals, true);
+		}
+
+		return component;
+	}
+
+	/**
+	 * Generates all components by joining the segments from the specified deque
+	 * @param segments Deque containing all segments of a cell
+	 * @param components List to be filled with the generated components
+	 */
+	private void generateComponents(Deque<Segment> segments, List<Component> components) {
+		while(!segments.isEmpty()) {
+			int numVertices = 0;
+			List<Segment> component = new ArrayList<>();
+
+			Segment start = segments.pop();
+
+			component.add(start);
+			numVertices += start.vertices.length;
+
+			Vec3 currentEndPoint = start.vertices[start.vertices.length - 1];
+
+			boolean hadNext;
+			do {
+				hadNext = false;
+
+				Iterator<Segment> segmentIT = segments.iterator();
+				while(segmentIT.hasNext()) {
+					Segment next = segmentIT.next();
+
+					//TODO Temporary hack. Use segment's start and end edges to optimize and make this more robust
+					if(next.vertices[0].distanceSq(currentEndPoint) < 0.0000001D) {
+						component.add(next);
+						numVertices += next.vertices.length;
+
+						currentEndPoint = next.vertices[next.vertices.length - 1];
+						hadNext = true;
+						segmentIT.remove();
+						break;
+					}
+				}
+
+			} while(hadNext);
+
+			Vec3[] vertices = new Vec3[numVertices - component.size()];
+			Vec3[] normals = new Vec3[numVertices - component.size()];
+
+			int index = 0;
+			for(int j = 0; j < component.size(); j++) {
+				Segment segment = component.get(j);
+
+				boolean isFirstSegment = j == 0;
+				boolean isLastSegment = j == component.size() - 1;
+
+				int startIndex = isFirstSegment ? 0 : 1;
+				int endIndex = isLastSegment ? segment.vertices.length - 1: segment.vertices.length;
+
+				for(int i = startIndex; i < endIndex; i++) {
+					vertices[index] = segment.vertices[i];
+					normals[index] = segment.normals[i];
+
+					index++;
+				}
+			}
+
+			components.add(new Component(vertices, normals, false));
+		}
+	}
+
+	/**
+	 * Generates all segments of a face cell
+	 * @param cell CMS cell containing the Hermite Data
+	 * @param faceCellIndex Face cell index, see {@link CMSCell#getCells(Face)}
+	 * @param face Face of the face cell
+	 * @param segments Collection to be filled with the generated segments
+	 */
+	private void generateFaceCellSegments(CMSCell cell, int faceCellIndex, Face face, Collection<Segment> segments) {
+		float width = cell.getCellWidth(faceCellIndex);
+		float height = cell.getCellHeight(faceCellIndex);
+		Vec3 pos = cell.getCellPosition(faceCellIndex);
+
+		int[] materials = cell.getMaterials(faceCellIndex);
+
+		byte caseIndex = 0;
+
+		if(this.isSolid(materials[0])) caseIndex |= 0b0001;
+		if(this.isSolid(materials[1])) caseIndex |= 0b0010;
+		if(this.isSolid(materials[2])) caseIndex |= 0b0100;
+		if(this.isSolid(materials[3])) caseIndex |= 0b1000;
+
+		byte[] edgeIndices = MS_EDGE_TABLE[caseIndex];
+
+		int[] edges = cell.getEdges(faceCellIndex);
+
+		int numTaggedEdges = 0;
+		int[] taggedEdges = new int[4];
+		float[] intersectionsX = new float[4];
+		float[] intersectionsY = new float[4];
+
+		for(int edge : edgeIndices) {
+			taggedEdges[numTaggedEdges] = edges[edge];
+
+			switch(edge) {
+			case 0:
+				intersectionsX[numTaggedEdges] = cell.getIntersection(edges[edge]);
+				intersectionsY[numTaggedEdges] = 0;
+				break;
+			case 1:
+				intersectionsX[numTaggedEdges] = width;
+				intersectionsY[numTaggedEdges] = cell.getIntersection(edges[edge]);
+				break;
+			case 2:
+				intersectionsX[numTaggedEdges] = width - cell.getIntersection(edges[edge]);
+				intersectionsY[numTaggedEdges] = height;
+				break;
+			case 3:
+				intersectionsX[numTaggedEdges] = 0;
+				intersectionsY[numTaggedEdges] = height - cell.getIntersection(edges[edge]);
+				break;
+			}
+
+			numTaggedEdges++;
+		}
+
+		switch(numTaggedEdges) {
+		case 0:
+			//Completely empty or full
+			break;
+		case 2: {
+			//Unambiguous case, can create segment immediately
+
+			Vec3 te0n = cell.getNormal(taggedEdges[0]);
+			float te0nx = (float) te0n.dot(face.basisX);
+			float te0ny = (float) te0n.dot(face.basisY);
+			float te0nrs = this.invSqrtOrZero(te0nx * te0nx + te0ny * te0ny);
+			te0nx *= te0nrs;
+			te0ny *= te0nrs;
+
+			Vec3 te1n = cell.getNormal(taggedEdges[1]);
+			float te1nx = (float) te1n.dot(face.basisX);
+			float te1ny = (float) te1n.dot(face.basisY);
+			float te1nrs = this.invSqrtOrZero(te1nx * te1nx + te1ny * te1ny);
+			te1nx *= te1nrs;
+			te1ny *= te1nrs;
+
+			float[] sharpFeature = new float[2];
+			this.findLineIntersection(intersectionsX[0], intersectionsY[0], intersectionsX[0] + te0ny, intersectionsY[0] - te0nx, intersectionsX[1], intersectionsY[1], intersectionsX[1] + te1ny, intersectionsY[1] - te1nx, sharpFeature);
+
+			segments.add(this.createSegment(pos, face, taggedEdges[0], te0n, intersectionsX[0], intersectionsY[0], te0nx, te0ny, taggedEdges[1], te1n, intersectionsX[1], intersectionsY[1], te1nx, te1ny, sharpFeature));
+
+			break;
+		}
+		case 4: {
+			//Need to resolve ambiguity first by checking for overlapping sharp features
+
+			int te0 = taggedEdges[0];
+			float te0x = intersectionsX[0];
+			float te0y = intersectionsY[0];
+			Vec3 te0n = cell.getNormal(te0);
+			float te0nx = (float) te0n.dot(face.basisX);
+			float te0ny = (float) te0n.dot(face.basisY);
+			float te0nrs = this.invSqrtOrZero(te0nx * te0nx + te0ny * te0ny);
+			te0nx *= te0nrs;
+			te0ny *= te0nrs;
+
+			int te1 = taggedEdges[1];
+			float te1x = intersectionsX[1];
+			float te1y = intersectionsY[1];
+			Vec3 te1n = cell.getNormal(te1);
+			float te1nx = (float) te1n.dot(face.basisX);
+			float te1ny = (float) te1n.dot(face.basisY);
+			float te1nrs = this.invSqrtOrZero(te1nx * te1nx + te1ny * te1ny);
+			te1nx *= te1nrs;
+			te1ny *= te1nrs;
+
+			int te2 = taggedEdges[2];
+			float te2x = intersectionsX[2];
+			float te2y = intersectionsY[2];
+			Vec3 te2n = cell.getNormal(te2);
+			float te2nx = (float) te2n.dot(face.basisX);
+			float te2ny = (float) te2n.dot(face.basisY);
+			float te2nrs = this.invSqrtOrZero(te2nx * te2nx + te2ny * te2ny);
+			te2nx *= te2nrs;
+			te2ny *= te2nrs;
+
+			int te3 = taggedEdges[3];
+			float te3x = intersectionsX[3];
+			float te3y = intersectionsY[3];
+			Vec3 te3n = cell.getNormal(te3);
+			float te3nx = (float) te3n.dot(face.basisX);
+			float te3ny = (float) te3n.dot(face.basisY);
+			float te3nrs = this.invSqrtOrZero(te3nx * te3nx + te3ny * te3ny);
+			te3nx *= te3nrs;
+			te3ny *= te3nrs;
+
+			float[] sharpFeature1 = new float[2];
+			float[] sharpFeature2 = new float[2];
+
+			boolean validCombination = false;
+
+			//Test sharp feature of te0+te1 and te2+te3 for overlap
+			if(this.findLineIntersection(te0x, te0y, te0x + te0ny, te0y - te0nx, te1x, te1y, te1x + te1ny, te1y - te1nx, sharpFeature1) && this.findLineIntersection(te2x, te2y, te2x + te2ny, te2y - te2nx, te3x, te3y, te3x + te3ny, te3y - te3nx, sharpFeature2)) {
+				if(!this.checkTriIntersection(te0x, te0y, sharpFeature1[0], sharpFeature1[1], te1x, te1y, te2x, te2y, sharpFeature2[0], sharpFeature2[1], te3x, te3y)) {
+					segments.add(this.createSegment(pos, face, taggedEdges[0], te0n, te0x, te0y, te0nx, te0ny, taggedEdges[1], te1n, te1x, te1y, te1nx, te1ny, sharpFeature1));
+					segments.add(this.createSegment(pos, face, taggedEdges[2], te2n, te2x, te2y, te2nx, te2ny, taggedEdges[3], te3n, te3x, te3y, te3nx, te3ny, sharpFeature2));
+					validCombination = true;
+				}
+			}
+
+			if(!validCombination) {
+				//Test sharp feature of te1+te2 and te0+te3 for overlap
+				if(this.findLineIntersection(te1x, te1y, te1x + te1ny, te1y - te1nx, te2x, te2y, te2x + te2ny, te2y - te2nx, sharpFeature1) && this.findLineIntersection(te0x, te0y, te0x + te0ny, te0y - te0nx, te3x, te3y, te3x + te3ny, te3y - te3nx, sharpFeature2)) {
+					//if(!this.checkTriIntersection(te1x, te1y, sharpFeature1[0], sharpFeature1[1], te2x, te2y, te0x, te0y, sharpFeature2[0], sharpFeature2[1], te3x, te3y)) {
+					segments.add(this.createSegment(pos, face, taggedEdges[2], te2n, te2x, te2y, te2nx, te2ny, taggedEdges[1], te1n, te1x, te1y, te1nx, te1ny, sharpFeature1));
+					segments.add(this.createSegment(pos, face, taggedEdges[0], te0n, te0x, te0y, te0nx, te0ny, taggedEdges[3], te3n, te3x, te3y, te3nx, te3ny, sharpFeature2));
+					//}
+				}
+			}
+
+			break;
+		}
+		default:
+			//Uhm..
+			break;
+		}
+	}
+
+	/**
+	 * Creates a segment from the specified edges and sharp feature.
+	 * <pre>
+	 * Local coordinate system:
+	 * 
+	 * Y
+	 * ^
+	 * |
+	 * |
+	 * |
+	 * P---------> X
+	 * 
+	 * Where P = cell's position
+	 * </pre>
+	 * @param pos Cell's position, see {@link CMSCell#getCellPosition(int)}
+	 * @param face Facing of the cell
+	 * @param e1 First edge's index
+	 * @param e1n First edge's normal
+	 * @param e1x First edge's local intersection X coordinate
+	 * @param e1y First edge's local intersection Y coordinate
+	 * @param e1nx First edge's local normal X coordinate
+	 * @param e1ny First edge's local normal Y coordinate
+	 * @param e2 Second edge's index
+	 * @param e2n Second edge's normal
+	 * @param e2x Second edge's local intersection X coordinate
+	 * @param e2y Second edge's local intersection Y coordinate
+	 * @param e2nx Second edge's local normal X coordinate     
+	 * @param e2ny Second edge's local normal Y coordinate     
+	 * @param sharpFeature 2D sharp feature of the two edges (i.e. intersection of the lines perpendicular to the normals)
+	 * @return Segment created from the input data. The segment is oriented using the normals and may contain the sharp feature if the sharp feature {@link #isSharp2DFeature(float)} criterion is fulfilled
+	 */
+	private Segment createSegment(Vec3 pos, Face face, int e1, Vec3 e1n, float e1x, float e1y, float e1nx, float e1ny, int e2, Vec3 e2n, float e2x, float e2y, float e2nx, float e2ny, float[] sharpFeature) {
+		int index = 0;
+		boolean isSharpFeature = this.isSharp2DFeature(e1nx * e2nx + e1ny * e2ny);
+		Vec3[] vertices = new Vec3[isSharpFeature ? 3 : 2];
+		Vec3[] normals = new Vec3[isSharpFeature ? 3 : 2];
+
+		vertices[index] = this.cellSpaceToWorldSpace(pos, face, e1x, e1y);
+		normals[index] = e1n;
+		index++;
+
+		if(isSharpFeature) {
+			vertices[index] = this.cellSpaceToWorldSpace(pos, face, sharpFeature[0], sharpFeature[1]);
+			normals[index] = null;
+			index++;
+		}
+
+		vertices[index] = this.cellSpaceToWorldSpace(pos, face, e2x, e2y);
+		normals[index] = e2n;
+
+		return new Segment(vertices, normals, e1, e2);
+	}
+
+	private float invSqrtOrZero(float x) {
+		if(x <= 0) return 0;
+		float sqrt = (float) Math.sqrt(x);
+		return 1.0F / sqrt;
+	}
+
+	private Vec3 cellSpaceToWorldSpace(Vec3 cellPos, Face face, double x, double y) {
+		return cellPos.add(face.basisX.mul(x)).add(face.basisY.mul(y));
+	}
+
+	private boolean findLineIntersection(float x1, float y1, float x2, float y2,
+			float x3, float y3, float x4, float y4, float[] result) {
+		float d = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+
+		float rx = ((x1 * y2 - y1 * x2) * (x3 - x4) - (x1 - x2) * (x3 * y4 - y3 * x4)) / d;
+		float ry = ((x1 * y2 - y1 * x2) * (y3 - y4) - (y1 - y2) * (x3 * y4 - y3 * x4)) / d;
+
+		if(!Float.isFinite(rx) || !Float.isFinite(ry)) {
+			return false;
+		}
+
+		result[0] = rx;
+		result[1] = ry;
+
+		return true;
+	}
+
+	private boolean cross2(float a1x, float a1y, float b1x, float b1y, float c1x, float c1y, float a2x, float a2y, float b2x, float b2y, float c2x, float c2y) {
+		float dXa = a1x - c2x;
+		float dYa = a1y - c2y;
+		float dXb = b1x - c2x;
+		float dYb = b1y - c2y;
+		float dXc = c1x - c2x;
+		float dYc = c1y - c2y;
+		float dX21 = c2x - b2x;
+		float dY12 = b2y - c2y;
+		float D = dY12 * (a2x - c2x) + dX21 * (a2y - c2y);
+		float sa = dY12 * dXa + dX21 * dYa;
+		float sb = dY12 * dXb + dX21 * dYb;
+		float sc = dY12 * dXc + dX21 * dYc;
+		float ta = (c2y - a2y) * dXa + (a2x - c2x) * dYa;
+		float tb = (c2y - a2y) * dXb + (a2x - c2x) * dYb;
+		float tc = (c2y - a2y) * dXc + (a2x - c2x) * dYc;
+		if (D < 0) {
+			return ((sa >= 0 && sb >= 0 && sc >= 0) ||
+					(ta >= 0 && tb >= 0 && tc >= 0) ||
+					(sa+ta <= D && sb+tb <= D && sc+tc <= D));
+		}
+		return ((sa <= 0 && sb <= 0 && sc <= 0) ||
+				(ta <= 0 && tb <= 0 && tc <= 0) ||
+				(sa+ta >= D && sb+tb >= D && sc+tc >= D));
+	}
+
+	private boolean checkTriIntersection(float a1x, float a1y, float b1x, float b1y, float c1x, float c1y, float a2x, float a2y, float b2x, float b2y, float c2x, float c2y) {
+		return !(cross2(a1x, a1y, b1x, b1y, c1x, c1y, a2x, a2y, b2x, b2y, c2x, c2y) ||
+				cross2(a2x, a2y, b2x, b2y, c2x, c2y, a1x, a1y, b1x, b1y, c1x, c1y));
+	}
+}
+
+//// CMSCell.java ////
+package cms;
+
+/**
+ * This class represents an arbitrary cell populated with Hermite Data
+ * that is used by the Cubical Marching Squares algorithm to reconstruct the
+ * surface. Such a cell could for example be a leaf node of a tree structure such as
+ * a quad-tree, or a simple cell of a regular grid.
+ * All faces and cells must be aligned with the cartesian X/Y/Z coordinate system.
+ * <pre>
+ * Y+
+ * |
+ * |   Z+
+ * |  /
+ * | /
+ * |/
+ * ----------X+
+ * </pre>
+ * <p>
+ * The values from {@link #getIntersection(int)}, {@link #getNormal(int)} and {@link #getMaterial(int)} comprise
+ * the Hermite Data.
+ */
+public interface CMSCell {
+	/**
+	 * <pre>
+	 * Faces indices:
+	 *    ________________
+	 *   /|              /|
+	 *  / |     5       / |
+	 * /__|____________/  |
+	 * |  |       2    |  |
+	 * |3 |            |1 |
+	 * |  |            |  |
+	 * |  |____0_______|__|
+	 * | /             |  /
+	 * |/       4      | /
+	 * |_______________|/
+	 * 
+	 * Y+
+	 * |
+	 * |   Z+
+	 * |  /
+	 * | /
+	 * |/
+	 * ----------X+
+	 * </pre>
+	 */
+	public static enum Face {
+		Z_NEG(0, new Vec3(0, 0, -1), new Vec3(1, 0, 0), new Vec3(0, 1, 0)),
+		X_POS(1, new Vec3(1, 0, 0), new Vec3(0, 0, 1), new Vec3(0, 1, 0)),
+		Z_POS(2, new Vec3(0, 0, 1), new Vec3(-1, 0, 0), new Vec3(0, 1, 0)),
+		X_NEG(3, new Vec3(-1, 0, 0), new Vec3(0, 0, -1), new Vec3(0, 1, 0)),
+		Y_NEG(4, new Vec3(0, -1, 0), new Vec3(1, 0, 0), new Vec3(0, 0, -1)),
+		Y_POS(5, new Vec3(0, 1, 0), new Vec3(1, 0, 0), new Vec3(0, 0, 1));
+
+		public final int index;
+		public final Vec3 normal;
+		public final Vec3 basisX, basisY;
+
+		private Face(int index, Vec3 normal, Vec3 baseX, Vec3 baseY) {
+			this.index = index;
+			this.normal = normal;
+			this.basisX = baseX;
+			this.basisY = baseY;
+		}
+	}
+
+	/**
+	 * Returns the indices of all 2D face cells of the specified face
+	 * @param face Face to return the cell indices of
+	 */
+	public int[] getCells(Face face);
+
+	/**
+	 * Returns the 4 indices of all edges of the specified 2D face cell.
+	 * <p>
+	 * The returned edges must be in this specific order:
+	 * <pre>
+	 * Face:    X+                     X-
+	 * Y+                     Y+                  
+	 * ^   _____3_____        ^   _____3_____     
+	 * |  |           |       |  |           |    
+	 * |  |           |       |  |           |    
+	 * |  4           2       |  4           2    
+	 * |  |           |       |  |           |    
+	 * |  |_____1_____|       |  |_____1_____|    
+	 * |                      |                   
+	 * o---------------> Z+   o---------------> Z-
+	 * 
+	 * Face:    Z+                     Z-
+	 * Y+                     Y+                  
+	 * ^   _____3_____        ^   _____3_____     
+	 * |  |           |       |  |           |    
+	 * |  |           |       |  |           |    
+	 * |  4           2       |  4           2    
+	 * |  |           |       |  |           |    
+	 * |  |_____1_____|       |  |_____1_____|    
+	 * |                      |                   
+	 * o---------------> X-   o---------------> X+
+	 * 
+	 * Face:    Y+                     Y-
+	 * Z+                     Z-                  
+	 * ^   _____3_____        ^   _____3_____     
+	 * |  |           |       |  |           |    
+	 * |  |           |       |  |           |    
+	 * |  4           2       |  4           2    
+	 * |  |           |       |  |           |    
+	 * |  |_____1_____|       |  |_____1_____|    
+	 * |                      |                   
+	 * o---------------> X+   o---------------> X+
+	 * </pre>
+	 * @param cell Index of the face cell to return the 4 edge indices of
+	 */
+	public int[] getEdges(int cell);
+
+	/**
+	 * Returns the position of 1st corner of the specified 2D face cell.
+	 * The 1st corner is specified in {@link #getMaterials(int)}.
+	 * @param cell Index of the face cell to return the position of
+	 */
+	public Vec3 getCellPosition(int cell);
+
+	/**
+	 * Returns the width of the specified 2D face cell.
+	 * The width is the distance between the 2nd and 1st corner as specified in {@link #getMaterials(int)}.
+	 * @param cell Index of the face cell to return the width of
+	 */
+	public float getCellWidth(int cell);
+
+	/**
+	 * Returns the height of the specified 2D face cell.
+	 * The height is the distance between the 4th and 1st corner as specified in {@link #getMaterials(int)}.
+	 * @param cell Index of the face cell to return the height of
+	 */
+	public float getCellHeight(int cell);
+
+	/**
+	 * Returns the materials at the four corners of the specified 2D face cell.
+	 * <p>
+	 * The corners must be in this specific order:
+	 * <pre>
+	 * Face:    X+                     X-
+	 * Y+                     Y+                  
+	 * ^  4-----------3       ^  4-----------3    
+	 * |  |           |       |  |           |    
+	 * |  |           |       |  |           |    
+	 * |  |           |       |  |           |    
+	 * |  |           |       |  |           |    
+	 * |  1-----------2       |  1-----------2    
+	 * |                      |                   
+	 * o---------------> Z+   o---------------> Z-
+	 * 
+	 * Face:    Z+                     Z-
+	 * Y+                     Y+                  
+	 * ^  4-----------3       ^  4-----------3    
+	 * |  |           |       |  |           |    
+	 * |  |           |       |  |           |    
+	 * |  |           |       |  |           |    
+	 * |  |           |       |  |           |    
+	 * |  1-----------2       |  1-----------2    
+	 * |                      |                   
+	 * o---------------> X-   o---------------> X+
+	 * 
+	 * Face:    Y+                     Y-
+	 * Z+                     Z-                  
+	 * ^  4-----------3       ^  4-----------3    
+	 * |  |           |       |  |           |    
+	 * |  |           |       |  |           |    
+	 * |  |           |       |  |           |    
+	 * |  |           |       |  |           |    
+	 * |  1-----------2       |  1-----------2    
+	 * |                      |                   
+	 * o---------------> X+   o---------------> X+
+	 * </pre>
+	 * @param corner Index of the face cell to return the 4 materials of
+	 */
+	public int[] getMaterials(int cell);
+
+	/**
+	 * Returns the indices of all neighboring, i.e. touching, edges of the specified edge of a 2D face cell
+	 * @param edge Index of the edge to return the neighboring edge indices of
+	 */
+	public int[] getNeighboringEdges(int edge);
+
+	/**
+	 * Returns the surface intersection point on the specified edge of a 2D face cell.
+	 * <p>
+	 * The returned intersection point must follow a specific direction:
+	 * <pre>
+	 *  <-----3------
+	 * |             ^
+	 * |             |
+	 * 4             2
+	 * |             |
+	 * v             |
+	 *  ------1----->
+	 * 
+	 * Where 1, 2, 3 and 4 is the ordering of the edges as specified in {@link #getEdges(int)}
+	 * </pre>
+	 * @param edge Index of the 2D face cell edge to return the intersection point of
+	 */
+	public float getIntersection(int edge);
+
+	/**
+	 * Returns the surface normal on the specified edge of a 2D face cell
+	 * @param edge Index of the 2D face cell edge to return the surface normal of
+	 */
+	public Vec3 getNormal(int edge);
+}
+
+//// Component triangulation (using GL immediate mode for demonstration purposes) ////
+//// Most of this code is just finding and reconstructing the correct normals     ////
+voic renderComponent(Component component) {
+  double anchorX = 0;
+  double anchorY = 0;
+  double anchorZ = 0;
+
+  if(component.isSharp()) {
+    anchorX = component.getVertices()[0].x;
+    anchorY = component.getVertices()[0].y;
+    anchorZ = component.getVertices()[0].z;
+  } else {
+    for(int i = 0; i < component.getVertices().length; i++) {
+      Vec3 vec = component.getVertices()[i];
+      anchorX += vec.x / (float) component.getVertices().length;
+      anchorY += vec.y / (float) component.getVertices().length;
+      anchorZ += vec.z / (float) component.getVertices().length;
+    }
+  }
+  
+  GL11.glBegin(GL11.GL_TRIANGLES);
+  triangulateComponent(component, new Vec3(anchorX, anchorY, anchorZ));
+  GL11.glEnd();
+}
+
+/**
+ * Finds sharp sections of the component, i.e. sections that are enclosed by two null normals.
+ * The normal of that section is then the average of all non-null normals in that section.
+ * This allows sharp edges' normals to be interpolated along the edge without mixing with the normals
+ * on the other side of the sharp edge.
+ * @param component Component to find the sharp sections of
+ * @param sharpSections List to be filled with the sharp section indices
+ * @param sharpSectionNormals List to be filled with the sharp section normals
+ */
+void findSharpComponentSections(Component component, Vec3 anchor, List<int[]> sharpSections, List<Vec3> sharpSectionNormals) {
+  if(component.isSharp()) {
+    int sharpSectionStart = -1;
+    Vec3 sharpSectionNormalsSum = Vec3.ZERO;
+
+    for(int i = 0; i < (component.getVertices().length - 1) * 2; i++) {
+      int j = (i % (component.getVertices().length - 1)) + 1;
+
+      Vec3 n = component.getNormals()[j];
+
+      if(n == null) {
+        if(sharpSectionStart != -1) {
+          Vec3 sharpSectionNormal = sharpSectionNormalsSum.normalized();
+
+          if(j < sharpSectionStart) {
+            sharpSections.add(new int[] { j, component.getVertices().length });
+            sharpSectionNormals.add(sharpSectionNormal);
+
+            sharpSections.add(new int[] { 1, sharpSectionStart });
+            sharpSectionNormals.add(sharpSectionNormal);
+          } else {
+            sharpSections.add(new int[] { sharpSectionStart, j });
+            sharpSectionNormals.add(sharpSectionNormal);
+          }
+        }
+
+        sharpSectionStart = j;
+        sharpSectionNormalsSum = Vec3.ZERO;
+      } else if(sharpSectionStart != -1) {
+        sharpSectionNormalsSum = sharpSectionNormalsSum.add(n);
+      }
+    }
+  }
+}
+
+void triangulateComponent(Component component, Vec3 anchor) {
+  if(component.isSharp()) {
+    List<int[]> sharpSections = new ArrayList<>();
+    List<Vec3> sharpSectionNormals = new ArrayList<>();
+
+    findSharpComponentSections(component, anchor, sharpSections, sharpSectionNormals);
+
+    for(int i = 1; i < component.getVertices().length; i++) {
+      Vec3 v1 = component.getVertices()[i];
+      Vec3 n1 = component.getNormals()[i];
+
+      Vec3 v2;
+      Vec3 n2;
+      if(i == component.getVertices().length - 1) {
+        v2 = component.getVertices()[1]; 
+        n2 = component.getNormals()[1];  
+      } else {
+        v2 = component.getVertices()[i + 1]; 
+        n2 = component.getNormals()[i + 1];  
+      }
+
+      Vec3 faceAvgNormal = Vec3.ZERO;
+      if(n1 != null) faceAvgNormal = faceAvgNormal.add(n1.mul(1 / v1.distance(anchor)));
+      if(n2 != null) faceAvgNormal = faceAvgNormal.add(n2.mul(1 / v2.distance(anchor)));
+      faceAvgNormal = faceAvgNormal.normalized();
+
+      Vec3 anchorNormal = null;
+
+      //Find the normal of the section we're in
+      for(int j = 0; j < sharpSections.size(); j++) {
+        int[] sectionIndices = sharpSections.get(j);
+
+        if(i >= sectionIndices[0] && i < sectionIndices[1]) {
+          anchorNormal = sharpSectionNormals.get(j);
+        }
+      }
+
+      if(anchorNormal == null) {
+        anchorNormal = faceAvgNormal;
+      }
+
+      GL11.glColor3d(Math.abs(anchorNormal.x), Math.abs(anchorNormal.y), Math.abs(anchorNormal.z));
+      GL11.glNormal3d(anchorNormal.x, anchorNormal.y, anchorNormal.z);
+      GL11.glVertex3d(anchor.x, anchor.y, anchor.z);
+
+      if(n1 != null) {
+        GL11.glColor3d(Math.abs(n1.x), Math.abs(n1.y), Math.abs(n1.z));
+        GL11.glNormal3d(n1.x, n1.y, n1.z);
+      } else {
+        GL11.glColor3d(Math.abs(faceAvgNormal.x), Math.abs(faceAvgNormal.y), Math.abs(faceAvgNormal.z));
+        GL11.glNormal3d(faceAvgNormal.x, faceAvgNormal.y, faceAvgNormal.z);
+      }
+      GL11.glVertex3d(v1.x, v1.y, v1.z);
+
+      if(n2 != null) {
+        GL11.glColor3d(Math.abs(n2.x), Math.abs(n2.y), Math.abs(n2.z));
+        GL11.glNormal3d(n2.x, n2.y, n2.z);
+      } else {
+        GL11.glColor3d(Math.abs(faceAvgNormal.x), Math.abs(faceAvgNormal.y), Math.abs(faceAvgNormal.z));
+        GL11.glNormal3d(faceAvgNormal.x, faceAvgNormal.y, faceAvgNormal.z);
+      }
+      GL11.glVertex3d(v2.x, v2.y, v2.z);
+    }
+  } else {
+    Vec3 fullAvgNormal = Vec3.ZERO;
+
+    for(int i = 0; i < component.getVertices().length; i++) {
+      Vec3 v = component.getVertices()[i];
+      Vec3 n = component.getNormals()[i];
+      if(n != null) {
+        fullAvgNormal = fullAvgNormal.add(n.mul(1 / v.distance(anchor)));
+      }
+    }
+
+    fullAvgNormal = fullAvgNormal.normalized();
+
+    for(int i = 0; i < component.getVertices().length; i++) {
+      Vec3 v1 = component.getVertices()[i];
+      Vec3 n1 = component.getNormals()[i];
+
+      Vec3 v2;
+      Vec3 n2;
+      if(i == component.getVertices().length - 1) {
+        v2 = component.getVertices()[0]; 
+        n2 = component.getNormals()[0];  
+      } else {
+        v2 = component.getVertices()[i + 1]; 
+        n2 = component.getNormals()[i + 1];  
+      }
+
+      Vec3 faceAvgNormal = fullAvgNormal;
+      if(n1 != null) faceAvgNormal = faceAvgNormal.add(n1.mul(1 / v1.distance(anchor)));
+      if(n2 != null) faceAvgNormal = faceAvgNormal.add(n2.mul(1 / v2.distance(anchor)));
+      faceAvgNormal = faceAvgNormal.normalized();
+
+      GL11.glColor3d(Math.abs(fullAvgNormal.x), Math.abs(fullAvgNormal.y), Math.abs(fullAvgNormal.z));
+      GL11.glNormal3d(fullAvgNormal.x, fullAvgNormal.y, fullAvgNormal.z);
+      GL11.glVertex3d(anchor.x, anchor.y, anchor.z);
+
+      if(n1 != null) {
+        GL11.glColor3d(Math.abs(n1.x), Math.abs(n1.y), Math.abs(n1.z));
+        GL11.glNormal3d(n1.x, n1.y, n1.z);
+      } else {
+        GL11.glColor3d(Math.abs(faceAvgNormal.x), Math.abs(faceAvgNormal.y), Math.abs(faceAvgNormal.z));
+        GL11.glNormal3d(faceAvgNormal.x, faceAvgNormal.y, faceAvgNormal.z);
+      }
+      GL11.glVertex3d(v1.x, v1.y, v1.z);
+
+      if(n2 != null) {
+        GL11.glColor3d(Math.abs(n2.x), Math.abs(n2.y), Math.abs(n2.z));
+        GL11.glNormal3d(n2.x, n2.y, n2.z);
+      } else {
+        GL11.glColor3d(Math.abs(faceAvgNormal.x), Math.abs(faceAvgNormal.y), Math.abs(faceAvgNormal.z));
+        GL11.glNormal3d(faceAvgNormal.x, faceAvgNormal.y, faceAvgNormal.z);
+      }
+      GL11.glVertex3d(v2.x, v2.y, v2.z);
+    }
+  }
+}
