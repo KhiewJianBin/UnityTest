@@ -15,36 +15,57 @@ public class MarchingSquares_Example : MonoBehaviour
     [Header("Marching Squares")]
     [Range(0, 100)] public int gridResolution = 100;
     [Range(0, 10)] public float gridSize = 1;
-
+    [Range(0, 1)] public float BinaryThreshold = 0.5f;
     public bool Interpolate = false;
-    public float BinaryThreshold = 0.5f;
+
+    [Header("Noise")]
+    [Range(0.01f, 1f)] public float noiseResolution = 1;
+
+    [Header("Mesh")]
+    [SerializeField] MeshFilter meshFilter;
 
     [Header("Debug")]
-    [Range(0, 1)] float gridPointSize = 0.5f; // Percentage of gridResolution
-
-    [SerializeField] MeshFilter meshFilter;
+    float gridPointSize = 0.5f; // Percentage of gridResolution
 
     MarchingSquares ms = new();
 
     void Update()
     {
-        ms.Setup(gridResolution, Vector2.zero, 0.2f);
-
-        ms.Setup(gridResolution, (float posX, float posY) =>
+        float[,] inBuffer;
+        inBuffer = new float[gridResolution + 1, gridResolution + 1];
+        for (int x = 0; x <= gridResolution; x++)
         {
-            posX -= gridResolution / 2;
-            posY -= gridResolution / 2;
+            for (int y = 0; y <= gridResolution; y++)
+            {
+                inBuffer[x, y] = Mathf.PerlinNoise(Time.time + ((x + Mathf.Epsilon) * noiseResolution ), Time.time + ((y + Mathf.Epsilon) * noiseResolution ));
+            }
+        }
 
-            float r = 5f;
-            float x = posX;
-            float y = posY;
+        ms.Setup(gridResolution, inBuffer);
 
-            return (r * r - x * x - y * y);
-        });
+        //ms.Setup(gridResolution, new Vector2(Time.time, Time.time), 0.2f);
+
+        //ms.Setup(gridResolution, (float posX, float posY) =>
+        //{
+        //    posX -= gridResolution / 2;
+        //    posY -= gridResolution / 2;
+
+        //    float r = 5f;
+        //    float x = posX;
+        //    float y = posY;
+
+        //    return (r * r - x * x - y * y);
+        //});
 
         // Run
-        ms.MarchSquaresInterpolate(Vector3.zero, BinaryThreshold, Interpolate,
-            gridSize);
+        if (Interpolate)
+        {
+            ms.MarchSquaresInterpolate(Vector3.zero, BinaryThreshold, gridSize);
+        }
+        else
+        {
+            ms.MarchSquares(Vector3.zero, BinaryThreshold, gridSize);
+        }
 
         // Extract
         var vertices = ms.GetVerticies();

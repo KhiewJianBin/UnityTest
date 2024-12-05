@@ -29,8 +29,6 @@ public class MarchingSquares_Test : MonoBehaviour
     float[,] bufferGrid;
     List<Vector3> vertices = new();
     List<int> indices = new();
-
-
     void OnDrawGizmos()
     {
         BuildDataGrid();
