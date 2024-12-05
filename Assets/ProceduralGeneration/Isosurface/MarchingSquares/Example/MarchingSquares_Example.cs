@@ -30,17 +30,20 @@ public class MarchingSquares_Example : MonoBehaviour
     {
         ms.Setup(gridResolution, Vector2.zero, 0.2f);
 
-        //ms.Setup(gridResolution, (float posX, float posY) =>
-        //{
-        //    float r = 5f;
-        //    float x = posX;
-        //    float y = posY;
+        ms.Setup(gridResolution, (float posX, float posY) =>
+        {
+            posX -= gridResolution / 2;
+            posY -= gridResolution / 2;
 
-        //    return (r * r - x * x - y * y);
-        //});
+            float r = 5f;
+            float x = posX;
+            float y = posY;
+
+            return (r * r - x * x - y * y);
+        });
 
         // Run
-        ms.MarchSquares(Vector3.zero, BinaryThreshold, Interpolate,
+        ms.MarchSquaresInterpolate(Vector3.zero, BinaryThreshold, Interpolate,
             gridSize);
 
         // Extract

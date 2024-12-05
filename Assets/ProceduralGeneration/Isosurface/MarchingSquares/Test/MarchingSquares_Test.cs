@@ -26,7 +26,7 @@ public class MarchingSquares_Test : MonoBehaviour
 
     [SerializeField] MeshFilter meshFilter;
 
-    float[,] dataGrid;
+    float[,] bufferGrid;
     List<Vector3> vertices = new();
     List<int> indices = new();
 
@@ -42,7 +42,7 @@ public class MarchingSquares_Test : MonoBehaviour
             for (int y = 0; y <= gridSize; y++)
             {
                 var offset = new Vector3(x, y, 0) * gridResolution;
-                Gizmos.color = new Color(1-dataGrid[x, y], 1 - dataGrid[x, y], 1 - dataGrid[x, y]);
+                Gizmos.color = new Color(1-bufferGrid[x, y], 1 - bufferGrid[x, y], 1 - bufferGrid[x, y]);
                 Gizmos.DrawSphere(pos+offset, pointSize);
             }
         }
@@ -66,10 +66,15 @@ public class MarchingSquares_Test : MonoBehaviour
         {
             for (int y = 0; y < gridSize; y++)
             {
-                var bl = dataGrid[x, y] < binarythreshold ? 0 : 1;
-                var br = dataGrid[x + 1, y] < binarythreshold ? 0 : 1;
-                var tr = dataGrid[x + 1, y + 1] < binarythreshold ? 0 : 1;
-                var tl = dataGrid[x, y + 1] < binarythreshold ? 0 : 1;
+                var bl_value = bufferGrid[x, y];
+                var br_value = bufferGrid[x + 1, y];
+                var tr_value = bufferGrid[x + 1, y + 1];
+                var tl_value = bufferGrid[x, y + 1];
+
+                var bl = bufferGrid[x, y] < binarythreshold ? 0 : 1;
+                var br = bufferGrid[x + 1, y] < binarythreshold ? 0 : 1;
+                var tr = bufferGrid[x + 1, y + 1] < binarythreshold ? 0 : 1;
+                var tl = bufferGrid[x, y + 1] < binarythreshold ? 0 : 1;
                 int bitflag = tl * 8 + tr * 4 + br * 2 + bl * 1;
 
                 var pos = new Vector3(x, y, 0);
@@ -78,14 +83,17 @@ public class MarchingSquares_Test : MonoBehaviour
                 Vector3[] verts = new Vector3[6];
                 int[] triangle = new int[6];
 
+                float basevalue = binarythreshold;
+
                 switch (bitflag)
                 {
                     case 1:
+
                         verts = new Vector3[]
                         {
-                            new(0, 0),
-                            new(0, 0.5f),
-                            new(0.5f, 0)
+                            new Vector2(0, 0),
+                            new Vector2(0, MathExtensions.remap(basevalue, bl_value, tl_value, 1, 0)),
+                            new Vector2(MathExtensions.remap(basevalue, bl_value, br_value, 1, 0), 0),
                         };
 
                         triangle = new int[]
@@ -97,13 +105,13 @@ public class MarchingSquares_Test : MonoBehaviour
                     case 2:
                         verts = new Vector3[]
                         {
-                            new(0.5f, 0),
-                            new(1, 0f),
-                            new(1f, 0.5f)
+                            new Vector2(MathExtensions.remap(basevalue, 1, 0, 0, 1), 0),
+                            new Vector2(1, 0),
+                            new Vector2(1, MathExtensions.remap(basevalue, 1, 0, 1, 0)),
                         };
 
                         triangle = new int[]
-                        { 
+                        {
                             0, 2, 1
                         };
 
@@ -111,10 +119,10 @@ public class MarchingSquares_Test : MonoBehaviour
                     case 3:
                         verts = new Vector3[]
                         {
-                            new(0, 0f),
-                            new(0, 0.5f),
-                            new(1f, 0f),
-                            new(1f, 0.5f)
+                            new Vector2(0, 0),
+                            new Vector2(0, MathExtensions.remap(basevalue, bl_value, tl_value, 1, 0)),
+                            new Vector2(1, 0),
+                            new Vector2(1, MathExtensions.remap(basevalue, br_value, tr_value, 1, 0)),
                         };
 
                         triangle = new int[]
@@ -127,9 +135,9 @@ public class MarchingSquares_Test : MonoBehaviour
                     case 4:
                         verts = new Vector3[]
                         {
-                            new(0.5f, 1f),
-                            new(1, 0.5f),
-                            new(1f, 1f),
+                            new Vector2(MathExtensions.remap(basevalue, tr_value, tl_value, 0, 1), 1),
+                            new Vector2(1, MathExtensions.remap(basevalue, tr_value, bl_value, 0, 1)),
+                            new Vector2(1, 1),
                         };
 
                         triangle = new int[]
@@ -141,13 +149,13 @@ public class MarchingSquares_Test : MonoBehaviour
                     case 5:
                         verts = new Vector3[]
                          {
-                            new(0, 0),
-                            new(0, 0.5f),
-                            new(0.5f, 0),
+                            new Vector2(0, 0),
+                            new Vector2(0, MathExtensions.remap(basevalue, bl_value, tl_value, 1, 0)),
+                            new Vector2(MathExtensions.remap(basevalue, bl_value, br_value, 1, 0), 0),
 
-                            new(0.5f, 1),
-                            new(1, 0.5f),
-                            new(1, 1),
+                            new Vector2(MathExtensions.remap(basevalue, tr_value, tl_value, 0, 1), 1),
+                            new Vector2(1, MathExtensions.remap(basevalue, tr_value, br_value, 0, 1)),
+                            new Vector2(1, 1),
                          };
 
                         triangle = new int[]
@@ -160,8 +168,8 @@ public class MarchingSquares_Test : MonoBehaviour
                     case 6:
                         verts = new Vector3[]
                         {
-                            new(0.5f, 0),
-                            new(0.5f, 1),
+                            new(MathExtensions.remap(basevalue, br_value, bl_value, 0, 1), 0),
+                            new(MathExtensions.remap(basevalue, tr_value, tl_value, 0, 1), 1),
                             new(1, 0),
                             new(1, 1)
                         };
@@ -177,14 +185,14 @@ public class MarchingSquares_Test : MonoBehaviour
                         verts = new Vector3[]
                         {
                             new(0, 0),
-                            new(0, 0.5f),
-                            new(0.5f, 1f),
-                            new(1, 0f),
-                            new(1f, 1f),
+                            new(0, MathExtensions.remap(basevalue, bl_value, tl_value, 1, 0)),
+                            new(MathExtensions.remap(basevalue, tr_value, tl_value, 0, 1), 1),
+                            new(1, 0),
+                            new(1, 1),
                         };
 
                         triangle = new int[]
-                        { 
+                        {
                             3, 0, 1,
                             3, 1, 2,
                             3, 2, 4
@@ -194,13 +202,13 @@ public class MarchingSquares_Test : MonoBehaviour
                     case 8:
                         verts = new Vector3[]
                         {
-                            new(0, 0.5f),
+                            new(0, MathExtensions.remap(basevalue, tl_value, bl_value, 0, 1)),
                             new(0, 1),
-                            new(0.5f, 1)
+                            new(MathExtensions.remap(basevalue, tl_value, tr_value, 0, 1), 1)
                         };
 
                         triangle = new int[]
-                        { 
+                        {
                             0, 1, 2
                         };
 
@@ -210,34 +218,35 @@ public class MarchingSquares_Test : MonoBehaviour
                         {
                             new(0, 0),
                             new(0, 1),
-                            new(0.5f, 0),
-                            new(0.5f, 1),
+                            new(MathExtensions.remap(basevalue, bl_value, br_value, 0, 1), 0),
+                            new(MathExtensions.remap(basevalue, tl_value, tr_value, 0, 1), 1),
                         };
 
                         triangle = new int[]
-                        { 
+                        {
                             0, 1, 3,
                             3, 2, 0
                         };
 
                         break;
                     case 10:
-                       verts = new Vector3[]
-                       {
-                            new(0, 0.5f),
+                        verts = new Vector3[]
+                        {
+                            new(0, MathExtensions.remap(basevalue, tl_value, bl_value, 0, 1)),
                             new(0, 1),
-                            new(0.5f, 0),
-                            new(0.5f, 1),
+                            new(MathExtensions.remap(basevalue, br_value, bl_value, 1, 0), 0),
+
+                            new(MathExtensions.remap(basevalue, tl_value, tr_value, 0, 1), 1),
                             new(1, 0),
-                            new(1, 0.5f)
-                       };
+                            new(1, MathExtensions.remap(basevalue, br_value, tr_value, 0, 1))
+                        };
 
                         triangle = new int[]
                         {
                             0, 1, 3,
                             2, 5, 4
                         };
-                        
+
 
                         break;
                     case 11:
@@ -245,13 +254,13 @@ public class MarchingSquares_Test : MonoBehaviour
                         {
                             new(0, 0),
                             new(0, 1),
-                            new(0.5f, 1),
-                            new(1f, 0),
-                            new(1, 0.5f),
+                            new(MathExtensions.remap(basevalue, tl_value, tr_value, 0, 1), 1),
+                            new(1, 0),
+                            new(1, MathExtensions.remap(basevalue, br_value, tr_value, 0, 1)),
                         };
 
                         triangle = new int[]
-                        { 
+                        {
                             0, 1, 2,
                             0, 2, 4,
                             0, 4, 3
@@ -261,14 +270,14 @@ public class MarchingSquares_Test : MonoBehaviour
                     case 12:
                         verts = new Vector3[]
                         {
-                            new(0, 0.5f),
+                            new(0, MathExtensions.remap(basevalue, tl_value, bl_value, 0, 1)),
                             new(0, 1),
-                            new(1, 0.5f),
-                            new(1, 1f) 
+                            new(1, MathExtensions.remap(basevalue, tr_value, br_value, 0, 1)),
+                            new(1, 1f)
                         };
 
                         triangle = new int[]
-                        { 
+                        {
                             0, 1, 3,
                             3, 2, 0
                         };
@@ -280,13 +289,13 @@ public class MarchingSquares_Test : MonoBehaviour
                         {
                             new(0, 0),
                             new(0, 1),
-                            new(0.5f, 0),
-                            new(1, 0.5f),
+                            new(MathExtensions.remap(basevalue, bl_value, br_value, 0, 1), 0),
+                            new(1, MathExtensions.remap(basevalue, tr_value, br_value, 1, 0)),
                             new(1, 1)
                         };
 
                         triangle = new int[]
-                        { 
+                        {
                             1, 2, 0,
                             1, 3, 2,
                             1, 4, 3,
@@ -297,15 +306,15 @@ public class MarchingSquares_Test : MonoBehaviour
                     case 14:
                         verts = new Vector3[]
                         {
-                            new(0, 0.5f),
-                            new(0, 1f),
-                            new(0.5f, 0),
-                            new(1f, 0f),
-                            new(1f, 1f)
+                            new(0, MathExtensions.remap(basevalue, tl_value, bl_value, 1, 0)),
+                            new(0, 1),
+                            new(MathExtensions.remap(basevalue, br_value, bl_value, 1, 0), 0),
+                            new(1, 0),
+                            new(1, 1)
                         };
 
                         triangle = new int[]
-                        { 
+                        {
                             4, 3, 2,
                             4, 2, 0,
                             4, 0, 1
@@ -322,7 +331,7 @@ public class MarchingSquares_Test : MonoBehaviour
                         };
 
                         triangle = new int[]
-                        { 
+                        {
                             0, 1, 3,
                             3, 2, 0
                         };
@@ -347,105 +356,105 @@ public class MarchingSquares_Test : MonoBehaviour
     
     void BuildDataGrid()
     {
-        dataGrid = new float[gridSize+1, gridSize+1];
+        bufferGrid = new float[gridSize+1, gridSize+1];
 
         switch (CaseNum)
         {
             case 0:
-                dataGrid[0, 0] = 0;
-                dataGrid[1, 0] = 0;
-                dataGrid[1, 1] = 0;
-                dataGrid[0, 1] = 0;
+                bufferGrid[0, 0] = 0;
+                bufferGrid[1, 0] = 0;
+                bufferGrid[1, 1] = 0;
+                bufferGrid[0, 1] = 0;
                 break;
             case 1:
-                dataGrid[0, 0] = 1;
-                dataGrid[1, 0] = 0;
-                dataGrid[1, 1] = 0;
-                dataGrid[0, 1] = 0;
+                bufferGrid[0, 0] = 1;
+                bufferGrid[1, 0] = 0;
+                bufferGrid[1, 1] = 0;
+                bufferGrid[0, 1] = 0;
                 break;
             case 2:
-                dataGrid[0, 0] = 0;
-                dataGrid[1, 0] = 1;
-                dataGrid[1, 1] = 0;
-                dataGrid[0, 1] = 0;
+                bufferGrid[0, 0] = 0;
+                bufferGrid[1, 0] = 1;
+                bufferGrid[1, 1] = 0;
+                bufferGrid[0, 1] = 0;
                 break;
             case 3:
-                dataGrid[0, 0] = 1;
-                dataGrid[1, 0] = 1;
-                dataGrid[1, 1] = 0;
-                dataGrid[0, 1] = 0;
+                bufferGrid[0, 0] = 1;
+                bufferGrid[1, 0] = 1;
+                bufferGrid[1, 1] = 0;
+                bufferGrid[0, 1] = 0;
                 break;
             case 4:
-                dataGrid[0, 0] = 0;
-                dataGrid[1, 0] = 0;
-                dataGrid[1, 1] = 1;
-                dataGrid[0, 1] = 0;
+                bufferGrid[0, 0] = 0;
+                bufferGrid[1, 0] = 0;
+                bufferGrid[1, 1] = 1;
+                bufferGrid[0, 1] = 0;
                 break;
             case 5:
-                dataGrid[0, 0] = 1;
-                dataGrid[1, 0] = 0;
-                dataGrid[1, 1] = 1;
-                dataGrid[0, 1] = 0;
+                bufferGrid[0, 0] = 1;
+                bufferGrid[1, 0] = 0;
+                bufferGrid[1, 1] = 1;
+                bufferGrid[0, 1] = 0;
                 break;
             case 6:
-                dataGrid[0, 0] = 0;
-                dataGrid[1, 0] = 1;
-                dataGrid[1, 1] = 1;
-                dataGrid[0, 1] = 0;
+                bufferGrid[0, 0] = 0;
+                bufferGrid[1, 0] = 1;
+                bufferGrid[1, 1] = 1;
+                bufferGrid[0, 1] = 0;
                 break;
             case 7:
-                dataGrid[0, 0] = 1;
-                dataGrid[1, 0] = 1;
-                dataGrid[1, 1] = 1;
-                dataGrid[0, 1] = 0;
+                bufferGrid[0, 0] = 1;
+                bufferGrid[1, 0] = 1;
+                bufferGrid[1, 1] = 1;
+                bufferGrid[0, 1] = 0;
                 break;
             case 8:
-                dataGrid[0, 0] = 0;
-                dataGrid[1, 0] = 0;
-                dataGrid[1, 1] = 0;
-                dataGrid[0, 1] = 1;
+                bufferGrid[0, 0] = 0;
+                bufferGrid[1, 0] = 0;
+                bufferGrid[1, 1] = 0;
+                bufferGrid[0, 1] = 1;
                 break;
             case 9:
-                dataGrid[0, 0] = 1;
-                dataGrid[1, 0] = 0;
-                dataGrid[1, 1] = 0;
-                dataGrid[0, 1] = 1;
+                bufferGrid[0, 0] = 1;
+                bufferGrid[1, 0] = 0;
+                bufferGrid[1, 1] = 0;
+                bufferGrid[0, 1] = 1;
                 break;
             case 10:
-                dataGrid[0, 0] = 0;
-                dataGrid[1, 0] = 1;
-                dataGrid[1, 1] = 0;
-                dataGrid[0, 1] = 1;
+                bufferGrid[0, 0] = 0;
+                bufferGrid[1, 0] = 1;
+                bufferGrid[1, 1] = 0;
+                bufferGrid[0, 1] = 1;
                 break;
             case 11:
-                dataGrid[0, 0] = 1;
-                dataGrid[1, 0] = 1;
-                dataGrid[1, 1] = 0;
-                dataGrid[0, 1] = 1;
+                bufferGrid[0, 0] = 1;
+                bufferGrid[1, 0] = 1;
+                bufferGrid[1, 1] = 0;
+                bufferGrid[0, 1] = 1;
                 break;
             case 12:
-                dataGrid[0, 0] = 0;
-                dataGrid[1, 0] = 0;
-                dataGrid[1, 1] = 1;
-                dataGrid[0, 1] = 1;
+                bufferGrid[0, 0] = 0;
+                bufferGrid[1, 0] = 0;
+                bufferGrid[1, 1] = 1;
+                bufferGrid[0, 1] = 1;
                 break;
             case 13:
-                dataGrid[0, 0] = 1;
-                dataGrid[1, 0] = 0;
-                dataGrid[1, 1] = 1;
-                dataGrid[0, 1] = 1;
+                bufferGrid[0, 0] = 1;
+                bufferGrid[1, 0] = 0;
+                bufferGrid[1, 1] = 1;
+                bufferGrid[0, 1] = 1;
                 break;
             case 14:
-                dataGrid[0, 0] = 0;
-                dataGrid[1, 0] = 1;
-                dataGrid[1, 1] = 1;
-                dataGrid[0, 1] = 1;
+                bufferGrid[0, 0] = 0;
+                bufferGrid[1, 0] = 1;
+                bufferGrid[1, 1] = 1;
+                bufferGrid[0, 1] = 1;
                 break;
             case 15:
-                dataGrid[0, 0] = 1;
-                dataGrid[1, 0] = 1;
-                dataGrid[1, 1] = 1;
-                dataGrid[0, 1] = 1;
+                bufferGrid[0, 0] = 1;
+                bufferGrid[1, 0] = 1;
+                bufferGrid[1, 1] = 1;
+                bufferGrid[0, 1] = 1;
                 break;
         }
        
