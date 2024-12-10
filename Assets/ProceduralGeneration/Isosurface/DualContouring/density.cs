@@ -48,6 +48,33 @@ public static class glm
         float cube = Cuboid(worldPosition, new Vector3(-4.0f, 10.0f, -4.0f), new Vector3(12.0f, 12.0f, 12.0f));
         float sphere = Sphere(worldPosition, new Vector3(15.0f, 2.5f, 1.0f), 16.0f);
 
+
+        return sphere;
+
         return Mathf.Max(-cube, Mathf.Min(sphere, terrain));
+    }
+
+    public static float Box_Implicit(float posX, float posY, float posZ)
+    {
+        float xt = posX - -4.0f;
+        float yt = posY - 10.0f;
+        float zt = posZ - -4.0f;
+
+        float xd = (xt * xt) - 12f * 12f;
+        float yd = (yt * yt) - 12f * 12f;
+        float zd = (zt * zt) - 12f * 12f;
+        float d;
+
+        if (xd > yd)
+            if (xd > zd)
+                d = xd;
+            else
+                d = zd;
+        else if (yd > zd)
+            d = yd;
+        else
+            d = zd;
+
+        return -d;
     }
 }
