@@ -60,11 +60,25 @@ public class Octree
     // data from the original DC impl, drives the contouring process
 
     public static readonly int[][] edgevmap = new int[12][] 
-{
-	new int[2]{2,4},new int[2]{1,5},new int[2]{2,6},new int[2]{3,7},	// x-axis 
-	new int[2]{0,2},new int[2]{1,3},new int[2]{4,6},new int[2]{5,7},	// y-axis
-	new int[2]{0,1},new int[2]{2,3},new int[2]{4,5},new int[2]{6,7}		// z-axis
-};
+    {
+        // x-axis 
+	    new int[2]{2,4},
+        new int[2]{1,5},
+        new int[2]{2,6},
+        new int[2]{3,7},	
+
+        // y-axis
+	    new int[2]{0,2},
+        new int[2]{1,3},
+        new int[2]{4,6},
+        new int[2]{5,7},	
+
+        // z-axis
+	    new int[2]{0,1},
+        new int[2]{2,3},
+        new int[2]{4,5},
+        new int[2]{6,7}		
+    };
 
     public static readonly int[] edgemask = { 5, 3, 6 };
 
