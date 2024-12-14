@@ -2,14 +2,12 @@
 using System.Runtime.Serialization.Formatters.Binary;
 using UnityEngine;
 
-//todo , use encryption / hash AES, SHA1  . etc.
+//todo
+//, use encryption / hash AES, SHA1  . etc.
 //yse nyktub=oke bacjyos
 public class SaveManager : MonoBehaviour
 {
-    /// <summary>
-    /// Implement singleton behaviour, having only one instance class only once
-    /// </summary>
-    public static SaveManager Instance; //static instance for other scripts to access
+    public static SaveManager Instance;
     public SaveData data;
 
     void Awake()
@@ -70,5 +68,10 @@ public class SaveManager : MonoBehaviour
             Debug.Log("Trying to Load non existing save file");
             return null;
         }
+    }
+
+    public class SaveData
+    {
+
     }
 }
