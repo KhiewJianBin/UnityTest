@@ -1,5 +1,5 @@
 ﻿using UnityEngine;
-public class FlyCamera : MonoBehaviour
+public class FlyCamera2 : MonoBehaviour
 {
     private Vector3 _angles;
     public float speed = 1.0f;
